@@ -4,6 +4,7 @@ from astropy.io import fits
 from astropy.time import Time
 
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 def readpsrarch(fname, dedisperse=True, verbose=True):
     """
@@ -496,7 +497,6 @@ def Gaussfit(dynspec, df, dt):
     ft = np.fft.fftfreq(dynspec.shape[0], dt)
     ft = np.fft.fftshift(ft.to(u.mHz).value)
     
-    df = (F[1]-F[0])*u.MHz
     tau = np.fft.fftfreq(dynspec.shape[1], df)
     tau = np.fft.fftshift(tau.to(u.microsecond).value)
     
@@ -522,8 +522,8 @@ def Gaussfit(dynspec, df, dt):
 
     # Compute "finite scintle error"
     # THIS MAY BE BUGGY, I NEED TO TEST
-    Tobs = dynspec.shape[0]* Tbin / 60.
-    BW = max(F) - min(F)
+    Tobs = dynspec.shape[0] * dt.value / 60.
+    BW = dynspec.shape[1] * df.value
     fillfrac = 0.2
     
     fin_scinterr = (1 + fillfrac * BW / nuscint) * (1 + fillfrac* Tobs / tscint)
@@ -570,3 +570,6 @@ def Gaussfit(dynspec, df, dt):
     ax3.set_xlim(min(dt_axis), max(dt_axis))
     
     return np.fft.fftshift(ccorr), fscint, fscinterr, tscint, tscinterr
+
+def Gaussian(x, sigma, A, C):
+    return A*np.exp( -x**2 / (2*sigma**2) ) + C
