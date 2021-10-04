@@ -377,9 +377,8 @@ def read_psrflux(fname):
 
     return dynspec, dynspec_err, T, F, source
 
-
 def plot_secspec(dynspec, freqs, dt=4*u.s, xlim=None, ylim=None, bintau=2, binft=1, vm=3.,
-                bint=1, binf = 1, pad=1):
+                bint=1, binf = 1, pad=1, plot=True):
 
     """
     dynspec:  array with units [time, frequency]
@@ -442,32 +441,33 @@ def plot_secspec(dynspec, freqs, dt=4*u.s, xlim=None, ylim=None, bintau=2, binft
     shigh = slow + vm
 
     # Not the nicest, have a set of different plots it can produce
-    plt.figure(figsize=(10,10))
-    ax2 = plt.subplot2grid((2, 2), (0, 1), rowspan=2)
-    ax3 = plt.subplot2grid((2, 2), (0, 0), rowspan=2)
+    if plot:
+        plt.figure(figsize=(10,10))
+        ax2 = plt.subplot2grid((2, 2), (0, 1), rowspan=2)
+        ax3 = plt.subplot2grid((2, 2), (0, 0), rowspan=2)
 
-    plt.subplots_adjust(wspace=0.1)
+        plt.subplots_adjust(wspace=0.1)
 
-    # Plot dynamic spectrum image
+        # Plot dynamic spectrum image
 
-    ax2.imshow(dspec_plot.T, aspect='auto', vmax=7, vmin=-3, origin='lower',
-                extent=[0,T,min(freqs), max(freqs)], cmap='viridis')
-    ax2.set_xlabel('time (min)', fontsize=16)
-    ax2.set_ylabel('freq (MHz)', fontsize=16)
-    ax2.yaxis.tick_right()
-    ax2.yaxis.set_label_position("right")
+        ax2.imshow(dspec_plot.T, aspect='auto', vmax=7, vmin=-3, origin='lower',
+                    extent=[0,T,min(freqs), max(freqs)], cmap='viridis')
+        ax2.set_xlabel('time (min)', fontsize=16)
+        ax2.set_ylabel('freq (MHz)', fontsize=16)
+        ax2.yaxis.tick_right()
+        ax2.yaxis.set_label_position("right")
 
-    # Plot Secondary spectrum
-    ax3.imshow(Sb.T, aspect='auto', vmin=slow, vmax=shigh, origin='lower',
-               extent=[min(ft), max(ft), min(tau), max(tau)], interpolation='nearest',
-              cmap='viridis')
-    ax3.set_xlabel(r'$f_{D}$ (mHz)', fontsize=16)
-    ax3.set_ylabel(r'$\tau$ ($\mu$s)', fontsize=16) 
+        # Plot Secondary spectrum
+        ax3.imshow(Sb.T, aspect='auto', vmin=slow, vmax=shigh, origin='lower',
+                   extent=[min(ft), max(ft), min(tau), max(tau)], interpolation='nearest',
+                  cmap='viridis')
+        ax3.set_xlabel(r'$f_{D}$ (mHz)', fontsize=16)
+        ax3.set_ylabel(r'$\tau$ ($\mu$s)', fontsize=16) 
 
-    if xlim:
-        ax3.set_xlim(-xlim, xlim)
-    if ylim:
-        ax3.set_ylim(-ylim, ylim)
+        if xlim:
+            ax3.set_xlim(-xlim, xlim)
+        if ylim:
+            ax3.set_ylim(-ylim, ylim)
     return CS, ft, tau
 
 def Gaussfit(dynspec, df, dt):
