@@ -376,3 +376,197 @@ def read_psrflux(fname):
     T = Time(float(mjd), format='mjd') + t
 
     return dynspec, dynspec_err, T, F, source
+
+
+def plot_secspec(dynspec, freqs, dt=4*u.s, xlim=None, ylim=None, bintau=2, binft=1, vm=3.,
+                bint=1, binf = 1, pad=1):
+
+    """
+    dynspec:  array with units [time, frequency]
+    freqs: array of frequencies in MHz
+    dt: Size of time bins, astropy unit
+    xlim: xaxis limits in mHz
+    ylim: yaxis limits in mus
+    
+    
+    vm: dynamic range of secspec
+    bintau:  Binning factor of SS in tau, for plotting purposes
+    binft:  Binning factor of S in ft, for plotting purposes
+    bint: Binning factor of dynspec in t, for plotting purposes
+    binf: Binning factor of dynspec in f, for plotting purposes
+    
+    Returns:
+    CS: 2D FFT of dynamic spectrum
+    ft: ft axis of CS
+    tau: tau axis of CS
+    """
+    
+    # Get frequency and time info for plot axes
+    bw = freqs[-1] - freqs[0]
+    df = (freqs[1]-freqs[0])*u.MHz
+    nt = dynspec.shape[0]
+    T = (nt * dt).to(u.min).value
+    
+    # Bin dynspec in time, frequency 
+    # ONLY FOR PLOTTING
+    nbin = dynspec.shape[0]//bint
+    dspec_plot = dynspec[:nbin*bint].reshape(nbin, bint, dynspec.shape[-1]).mean(1)
+    if binf > 1:
+        dspec_plot = dspec_plot.reshape(dspec_plot.shape[0],-1, binf).mean(-1)
+    dspec_plot = dspec_plot / np.std(dspec_plot)
+    
+    # 2D power spectrum is the Secondary spectrum
+    dynpad = np.pad(dynspec, pad_width=((dynspec.shape[0]*pad, 0), 
+                                       (0, dynspec.shape[1]*pad)), 
+                 mode='constant', constant_values=np.mean(dynspec)) 
+    CS = np.fft.fft2(dynpad)
+    S = np.fft.fftshift(CS)
+    S = np.abs(S)**2.0
+    
+    # Bin in tau and FT - ONLY AFTER SQUARING
+    Sb = S.reshape(-1,S.shape[1]//bintau, bintau).mean(-1)
+    if binft > 1:
+        nftbin = Sb.shape[0]//binft
+        print(Sb.shape)
+        Sb = Sb[:binft*nftbin].reshape(nftbin, binft, -1).mean(1)
+    Sb = np.log10(Sb)
+    
+    # Calculate the confugate frequencies (time delay, fringe rate), only used for plotting
+    ft = np.fft.fftfreq(S.shape[0], dt)
+    ft = np.fft.fftshift(ft.to(u.mHz).value)
+
+    tau = np.fft.fftfreq(S.shape[1], df)
+    tau = np.fft.fftshift(tau.to(u.microsecond).value)    
+    
+    slow = np.median(Sb)-0.2
+    shigh = slow + vm
+
+    # Not the nicest, have a set of different plots it can produce
+    plt.figure(figsize=(10,10))
+    ax2 = plt.subplot2grid((2, 2), (0, 1), rowspan=2)
+    ax3 = plt.subplot2grid((2, 2), (0, 0), rowspan=2)
+
+    plt.subplots_adjust(wspace=0.1)
+
+    # Plot dynamic spectrum image
+
+    ax2.imshow(dspec_plot.T, aspect='auto', vmax=7, vmin=-3, origin='lower',
+                extent=[0,T,min(freqs), max(freqs)], cmap='viridis')
+    ax2.set_xlabel('time (min)', fontsize=16)
+    ax2.set_ylabel('freq (MHz)', fontsize=16)
+    ax2.yaxis.tick_right()
+    ax2.yaxis.set_label_position("right")
+
+    # Plot Secondary spectrum
+    ax3.imshow(Sb.T, aspect='auto', vmin=slow, vmax=shigh, origin='lower',
+               extent=[min(ft), max(ft), min(tau), max(tau)], interpolation='nearest',
+              cmap='viridis')
+    ax3.set_xlabel(r'$f_{D}$ (mHz)', fontsize=16)
+    ax3.set_ylabel(r'$\tau$ ($\mu$s)', fontsize=16) 
+
+    if xlim:
+        ax3.set_xlim(-xlim, xlim)
+    if ylim:
+        ax3.set_ylim(-ylim, ylim)
+    return CS, ft, tau
+
+def Gaussfit(dynspec, df, dt):
+    
+    """
+    dynspec:  array with units [time, frequency]
+    df: channel width, astropy unit
+    dt: subint length, astropy unit
+    
+    Returns:
+    CS: 2D FFT of dynamic spectrum
+    ft: ft axis of CS
+    tau: tau axis of CS
+    """
+    
+    ccorr = np.fft.ifft2( np.fft.fft2(dynspec) * np.fft.fft2(dynspec).conj() )
+    ccorr = ccorr - np.median(ccorr)
+    
+    # Ignoring zero component with noise-noise correlation
+    ccorr_f = abs(ccorr[1]) + abs(ccorr[-1])
+    ccorr_f /= np.max(ccorr_f)
+    
+    ccorr_t = abs(ccorr[:,1]) + abs(ccorr[:,-1])
+    ccorr_t /= np.max(ccorr_t)
+
+    ft = np.fft.fftfreq(dynspec.shape[0], dt)
+    ft = np.fft.fftshift(ft.to(u.mHz).value)
+    
+    df = (F[1]-F[0])*u.MHz
+    tau = np.fft.fftfreq(dynspec.shape[1], df)
+    tau = np.fft.fftshift(tau.to(u.microsecond).value)
+    
+    df_axis = np.fft.fftfreq(dynspec.shape[1], d=(tau[1]-tau[0]) )
+    dt_axis = np.fft.fftfreq(dynspec.shape[0], d=(ft[1]-ft[0])*u.mHz ).to(u.min).value
+    
+    # Starting guess, currently hardcoded
+    p0 = [5., 1, 0]
+    popt, pcov = curve_fit(Gaussian, df_axis, ccorr_f, p0=p0)
+
+    nuscint = abs(popt[0])
+    nuscint_err = np.sqrt(pcov[0,0])
+    
+    fscint =  np.sqrt(2*np.log(2)) * nuscint
+    fscinterr =  np.sqrt(2*np.log(2)) * nuscint_err
+    
+    # Starting guess, currently hardcoded
+    pT = [20, 1, 0]
+    poptT, pcovT = curve_fit(Gaussian, dt_axis, ccorr_t, p0=p0)
+    
+    tscint = np.sqrt(2) * abs(poptT[0]) * 60.
+    tscinterr = np.sqrt(2) * np.sqrt(pcov[0,0]) * 60.
+
+    # Compute "finite scintle error"
+    # THIS MAY BE BUGGY, I NEED TO TEST
+    Tobs = dynspec.shape[0]* Tbin / 60.
+    BW = max(F) - min(F)
+    fillfrac = 0.2
+    
+    fin_scinterr = (1 + fillfrac * BW / nuscint) * (1 + fillfrac* Tobs / tscint)
+
+    tscinterr = np.sqrt( tscinterr**2 + tscint/fin_scinterr  )
+    fscinterr = np.sqrt( fscinterr**2 + fscint/fin_scinterr  )
+
+    ccorr = abs(ccorr)
+
+    vmax = np.mean(ccorr) + 10*np.std(ccorr)
+    vmin = np.mean(ccorr) - 3*np.std(ccorr)
+    
+    plt.figure(figsize=(8,8))
+
+    ax1 = plt.subplot2grid((4, 4), (1, 0), colspan=3, rowspan=3)
+    ax2 = plt.subplot2grid((4, 4), (1, 3), rowspan=3)
+    ax3 = plt.subplot2grid((4, 4), (0, 0), colspan=3)
+
+    plt.subplots_adjust(wspace=0.05)
+    
+    ax1.imshow(np.fft.fftshift(ccorr).T, aspect='auto', origin='lower',
+              extent=[min(dt_axis), max(dt_axis), min(df_axis), max(df_axis)],
+              vmax=vmax, vmin=vmin, cmap='Greys')
+
+    ax1.set_xlabel('dt (min)', fontsize=16)
+    ax1.set_ylabel(r'd$\nu$ (MHz)', fontsize=16)
+
+    df_shifted = np.fft.fftshift(df_axis)
+    dt_shifted = np.fft.fftshift(dt_axis)
+    ax2.plot( np.fft.fftshift(ccorr_f), df_shifted, color='k')
+    ax2.plot(Gaussian(df_shifted, *popt), df_shifted, color='tab:red',
+            linestyle='--')
+
+    ax2.yaxis.tick_right()
+    ax2.yaxis.set_label_position("right")
+    #ax2.set_ylabel(r'$d\nu$ (MHz)', fontsize=16)
+    ax2.set_xlabel(r'I (d$\nu$, dt=0)', fontsize=16)
+    ax2.set_ylim(min(df_axis), max(df_axis) )
+
+    ax3.plot( dt_shifted, np.fft.fftshift(ccorr_t), color='k')
+    ax3.plot( dt_shifted, Gaussian(dt_shifted, *poptT), color='tab:red',
+              linestyle='--')
+    ax3.set_ylabel(r'I (dt, d$\nu$=0)', fontsize=16)
+    ax3.set_xlim(min(dt_axis), max(dt_axis))
+    
+    return np.fft.fftshift(ccorr), fscint, fscinterr, tscint, tscinterr
